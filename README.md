@@ -1,5 +1,11 @@
 # claude-usage
 
+[![CI](https://github.com/zhixuanlucasfeng-cmyk/claude-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/zhixuanlucasfeng-cmyk/claude-usage/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/zhixuanlucasfeng-cmyk/claude-usage)](https://github.com/zhixuanlucasfeng-cmyk/claude-usage/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/zhixuanlucasfeng-cmyk/claude-usage/total)](https://github.com/zhixuanlucasfeng-cmyk/claude-usage/releases)
+![macOS](https://img.shields.io/badge/macOS-13%2B-black)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 See how many tokens and dollars you spend on **Claude Code**, plus **Codex** and
 **DeepSeek (via Hermes)**, from the logs already on your Mac. Nothing is sent
 anywhere.
@@ -17,6 +23,20 @@ anywhere.
 [中文说明](#中文说明)
 
 ## Install
+
+### Quick: download the app
+
+1. Install the CLI: `pipx install git+https://github.com/zhixuanlucasfeng-cmyk/claude-usage.git`
+   (or `python3 -m pip install --user git+https://github.com/zhixuanlucasfeng-cmyk/claude-usage.git`)
+2. Download `ClaudeUsageWidget-macOS.zip` from
+   [Releases](https://github.com/zhixuanlucasfeng-cmyk/claude-usage/releases/latest),
+   unzip it and move the app to Applications.
+3. The app is not notarized, so the first time, right-click it → Open → Open.
+
+For Claude plan limits on the widget, also set up the status line (step 3 of
+the installer below, or copy `widget/usage-statusline.sh` yourself).
+
+### From source
 
 Requirements: macOS 13+, Python 3.10+, Xcode Command Line Tools
 (`xcode-select --install`), and `jq` (built into macOS 15+, otherwise
@@ -93,7 +113,11 @@ CLI only (any OS):
 - **桌面小组件**：半透明卡片，显示今天的用量、近 7 天、Claude 5 小时 / 本周额度和
   Codex 本周额度（已用百分比和重置时间）
 
-**安装**：需要 macOS 13+、Python 3.10+、Xcode 命令行工具、jq，然后：
+**安装**：最简单是先 `pipx install git+https://github.com/zhixuanlucasfeng-cmyk/claude-usage.git`，
+再到 [Releases](https://github.com/zhixuanlucasfeng-cmyk/claude-usage/releases/latest) 下载
+`ClaudeUsageWidget-macOS.zip`，解压后第一次右键 → 打开。
+
+或者从源码安装（需要 macOS 13+、Python 3.10+、Xcode 命令行工具、jq）：
 
     git clone https://github.com/zhixuanlucasfeng-cmyk/claude-usage.git
     cd claude-usage

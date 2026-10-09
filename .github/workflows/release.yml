@@ -1,0 +1,16 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  widget:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: widget/build.sh ""
+      - run: cd widget && ditto -c -k --keepParent "Claude Usage Widget.app" ../ClaudeUsageWidget-macOS.zip
+      - run: gh release create "$GITHUB_REF_NAME" ClaudeUsageWidget-macOS.zip --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

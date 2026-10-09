@@ -3,7 +3,7 @@
 # claude-usage executable from this checkout's venv (override with $1).
 set -e
 cd "$(dirname "$0")"
-BIN="${1:-$(cd .. && pwd)/venv/bin/claude-usage}"
+BIN="${1-$(cd .. && pwd)/venv/bin/claude-usage}"  # pass "" for a release build
 APP="Claude Usage Widget.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"

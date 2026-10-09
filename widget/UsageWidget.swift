@@ -9,8 +9,12 @@ import UniformTypeIdentifiers
 
 let port = 8899
 let base = URL(string: "http://127.0.0.1:\(port)/")!
-// Set by build.sh: absolute path of the `claude-usage` executable.
-let serverBin = Bundle.main.object(forInfoDictionaryKey: "CUServerBin") as? String ?? "claude-usage"
+// build.sh records the venv's `claude-usage`; a downloaded release has none,
+// so fall back to where pipx / pip --user / Homebrew put it.
+let serverBin = ([Bundle.main.object(forInfoDictionaryKey: "CUServerBin") as? String].compactMap { $0 } + [
+    "~/.local/bin/claude-usage", "/opt/homebrew/bin/claude-usage", "/usr/local/bin/claude-usage",
+].map { NSString(string: $0).expandingTildeInPath })
+    .first { FileManager.default.isExecutableFile(atPath: $0) } ?? "claude-usage"
 let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     .appendingPathComponent("ClaudeUsageWidget", isDirectory: true)
 
@@ -504,7 +508,7 @@ final class WidgetController: NSObject {
                 p.arguments = ["serve", "--no-open", "--port", "\(port)"]
                 p.standardOutput = FileHandle.nullDevice
                 p.standardError = FileHandle.nullDevice
-                do { try p.run(); status.stringValue = "正在启动统计服务…" } catch { status.stringValue = "无法启动 claude-usage：\(error.localizedDescription)" }
+                do { try p.run(); status.stringValue = "正在启动统计服务…" } catch { status.stringValue = "找不到 claude-usage，请先安装（见 README）" }
             }
             return
         }
