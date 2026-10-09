@@ -1,0 +1,24 @@
+[project]
+name = "claude-usage"
+version = "0.1.0"
+description = "See your Claude Code, Codex and DeepSeek token usage and cost: CLI, local dashboard and a macOS desktop widget"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/zhixuanlucasfeng-cmyk/claude-usage"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+claude-usage = "claude_usage.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["claude_usage*"]
