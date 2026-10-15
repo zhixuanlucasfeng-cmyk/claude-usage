@@ -1,5 +1,5 @@
-// Translucent desktop widget for claude-usage, with Chainsaw Man / Reze themes.
-// Sits on the desktop (just below app windows), polls the local
+// Translucent usage widget for claude-usage, with Chainsaw Man / Reze themes.
+// A Dock app: a normal window that can be pinned above everything. Polls the local
 // `claude-usage serve` feed at /widget.json, and starts that server if needed.
 // Character art and an optional looping background video are files the user
 // picks per theme (right-click menu); nothing copyrighted ships in the app.
@@ -36,10 +36,10 @@ struct Theme {
 
 let themes = [
     Theme(id: "chainsaw", name: "电锯人", header: "DEVIL HUNTER", accent: rgb(0xd92b35),
-          series: [rgb(0xd92b35), rgb(0x3b8ccc), rgb(0xcc7019)],       // blood, saw steel, Pochita
+          series: [rgb(0xd92b35), rgb(0x3b8ccc), rgb(0xcc7019), rgb(0xe8c547)],  // blood, saw steel, Pochita, Power's horns
           gradient: [rgb(0x120c0d, 0.72), rgb(0x4a0c10, 0.62)]),        // black into dried blood
     Theme(id: "reze", name: "蕾塞", header: "REZE", accent: rgb(0xb9a6ff),
-          series: [rgb(0xdc6a32), rgb(0x7f72e6), rgb(0x2ba370)],       // blast orange, her hair, her eyes
+          series: [rgb(0xdc6a32), rgb(0x7f72e6), rgb(0x2ba370), rgb(0xe86fa8)],  // blast orange, her hair, her eyes, Power pink
           gradient: [rgb(0x120d24, 0.74), rgb(0x3a1f52, 0.62)]),        // typhoon night into violet
 ]
 let theme = themes.first { $0.id == UserDefaults.standard.string(forKey: "theme") } ?? themes[0]
@@ -67,7 +67,7 @@ func impact(_ size: CGFloat) -> NSFont {
     NSFont(name: "Impact", size: size) ?? .systemFont(ofSize: size, weight: .black)
 }
 
-struct Day { let date: String; let values: [Double] }  // claude, codex, deepseek
+struct Day { let date: String; let values: [Double]; var power: Double = 0 }  // claude, codex, deepseek
 
 // Seven stacked columns, one segment per tool, 2px surface gap between segments.
 final class WeekView: NSView {
@@ -76,7 +76,7 @@ final class WeekView: NSView {
         guard !days.isEmpty else { return }
         let maxTotal = max(days.map { $0.values.reduce(0, +) }.max() ?? 0, 1)
         let slot = bounds.width / CGFloat(days.count)
-        let barW = min(16, slot - 6)
+        let barW = min(16, slot - 10)
         for (i, day) in days.enumerated() {
             var y: CGFloat = 0
             let x = CGFloat(i) * slot + (slot - barW) / 2
@@ -93,6 +93,10 @@ final class WeekView: NSView {
                     NSRect(x: x, y: y, width: barW, height: h).fill()
                 }
                 y += h
+            }
+            if day.power > 0 {  // Power's share, as a thin bar to the right (it overlaps the stack)
+                series[3].setFill()
+                NSRect(x: x + barW + 1.5, y: 0, width: 2.5, height: max(1, CGFloat(day.power / maxTotal) * bounds.height)).fill()
             }
             if segs.isEmpty {  // keep quiet days visible as a baseline tick
                 ash.withAlphaComponent(0.35).setFill()
@@ -164,16 +168,37 @@ final class FireworksView: NSView {
     }
 }
 
-final class WidgetController: NSObject {
+// Borderless windows refuse key status by default; the zoom/pin shortcuts need it.
+final class WidgetWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+/// Dock / Finder icon: the theme card with a three-tool stacked bar.
+func appIcon() -> NSImage {
+    NSImage(size: NSSize(width: 512, height: 512), flipped: false) { r in
+        let card = NSBezierPath(roundedRect: r.insetBy(dx: 40, dy: 40), xRadius: 90, yRadius: 90)
+        NSGradient(colors: theme.gradient.map { $0.withAlphaComponent(1) })?.draw(in: card, angle: -45)
+        theme.accent.setStroke(); card.lineWidth = 10; card.stroke()
+        for (i, h) in [150.0, 250.0, 200.0].enumerated() {
+            series[i].setFill()
+            NSBezierPath(roundedRect: NSRect(x: 120 + Double(i) * 100, y: 120, width: 72, height: h), xRadius: 14, yRadius: 14).fill()
+        }
+        return true
+    }
+}
+
+final class WidgetController: NSObject, NSApplicationDelegate {
     let window: NSWindow
     let header = NSTextField(labelWithString: "DEVIL HUNTER")
     let date = label("", size: 11, weight: .medium, color: ash)
-    let values = (0..<3).map { _ in label("–", size: 16, weight: .heavy) }
-    let extras = (0..<3).map { _ in label("", size: 11, color: ash) }
+    let values = (0..<4).map { _ in label("–", size: 16, weight: .heavy) }
+    let extras = (0..<4).map { _ in label("", size: 11, color: ash) }
     let week = WeekView()
     let status = label("正在读取用量…", size: 10, color: ash)
     // Plan limits, one line each: Claude 5-hour, Claude week, Codex week.
     let limitLines = (0..<3).map { _ in label("", size: 10.5, color: ash) }
+    let pinButton = NSButton()
     let character = NSImageView()
     let card = NSView()
     let videoLayer = AVPlayerLayer()
@@ -181,23 +206,19 @@ final class WidgetController: NSObject {
     let tint = NSView()
     var startedServer = false
 
-    static let cardSize = NSSize(width: 410, height: 232)
+    static let cardSize = NSSize(width: 410, height: 258)
     static let overhang: CGFloat = 34   // how far a cut-out character pokes above the card
     static let artWidth: CGFloat = 140
 
     override init() {
         let cs = Self.cardSize
         let size = NSSize(width: cs.width, height: cs.height + Self.overhang)
-        window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window = WidgetWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         super.init()
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
         window.appearance = NSAppearance(named: .darkAqua)
-        // Just below normal app windows, so it shows on the desktop but never
-        // covers your work. (The desktop-icon level is not drawn on macOS 26.)
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         window.isMovableByWindowBackground = true
 
         let root = NSView(frame: NSRect(origin: .zero, size: size))
@@ -252,9 +273,9 @@ final class WidgetController: NSObject {
         headRow.alignment = .firstBaseline
         headRow.spacing = 8
 
-        let names = ["Claude", "Codex", "DeepSeek"]
+        let names = ["Claude", "Codex", "DeepSeek", "Power"]
         var rows: [NSView] = [headRow]
-        for i in 0..<3 {
+        for i in 0..<4 {
             let mark = NSView()  // a short blade-shaped key in the series color
             mark.wantsLayer = true
             mark.layer?.backgroundColor = series[i].cgColor
@@ -298,6 +319,35 @@ final class WidgetController: NSObject {
         ])
         for r in rows.dropFirst() { r.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
 
+        // Always-visible controls, top-right of the card: zoom out, zoom in, pin.
+        let tools: [(String, String, Selector)] = [
+            ("minus.magnifyingglass", "缩小 (⌘-)", #selector(zoomOut)),
+            ("plus.magnifyingglass", "放大 (⌘=)", #selector(zoomIn)),
+            ("pin", "置顶：不被其他窗口盖住 (⌘P)", #selector(togglePin)),
+        ]
+        let buttons = tools.map { sym, tip, action -> NSButton in
+            let b = action == #selector(togglePin) ? pinButton : NSButton()
+            b.image = NSImage(systemSymbolName: sym, accessibilityDescription: tip)
+            b.isBordered = false
+            b.contentTintColor = ash
+            b.toolTip = tip
+            b.target = self
+            b.action = action
+            return b
+        }
+        let toolRow = NSStackView(views: buttons)
+        toolRow.spacing = 6
+        toolRow.edgeInsets = NSEdgeInsets(top: 3, left: 7, bottom: 3, right: 7)
+        toolRow.wantsLayer = true  // dark pill so the icons read over character art
+        toolRow.layer?.backgroundColor = rgb(0x0b0a12, 0.7).cgColor
+        toolRow.layer?.cornerRadius = 11
+        toolRow.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(toolRow, positioned: .above, relativeTo: character)
+        NSLayoutConstraint.activate([
+            toolRow.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -8),
+            toolRow.topAnchor.constraint(equalTo: card.topAnchor, constant: theme.id == "reze" ? 10 : 12),
+        ])
+
         let menu = NSMenu()
         menu.addItem(withTitle: "打开完整统计", action: #selector(openDashboard), keyEquivalent: "").target = self
         let themeItem = menu.addItem(withTitle: "主题", action: nil, keyEquivalent: "")
@@ -313,13 +363,14 @@ final class WidgetController: NSObject {
         menu.addItem(withTitle: "放大", action: #selector(zoomIn), keyEquivalent: "").target = self
         menu.addItem(withTitle: "缩小", action: #selector(zoomOut), keyEquivalent: "").target = self
         menu.addItem(withTitle: "原始大小", action: #selector(zoomReset), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "置顶 / 取消置顶", action: #selector(togglePin), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "选择角色图片…", action: #selector(pickCharacter), keyEquivalent: "").target = self
         menu.addItem(withTitle: "移除角色图片", action: #selector(removeCharacter), keyEquivalent: "").target = self
         menu.addItem(withTitle: "选择背景视频…", action: #selector(pickVideo), keyEquivalent: "").target = self
         menu.addItem(withTitle: "移除背景视频", action: #selector(removeVideo), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出小组件", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         root.menu = menu
         let dbl = NSClickGestureRecognizer(target: self, action: #selector(openDashboard))
         dbl.numberOfClicksRequired = 2
@@ -336,7 +387,8 @@ final class WidgetController: NSObject {
         window.setFrameAutosaveName("ClaudeUsageWidget-csm")
         let saved = UserDefaults.standard.double(forKey: "scale")
         setScale(saved > 0 ? saved : 1)
-        window.orderFront(nil)
+        setPinned(UserDefaults.standard.bool(forKey: "pinned"))
+        window.makeKeyAndOrderFront(nil)
 
         refresh()
         Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
@@ -369,6 +421,46 @@ final class WidgetController: NSObject {
     @objc func pinch(_ g: NSMagnificationGestureRecognizer) {
         setScale(scale * (1 + g.magnification))
         g.magnification = 0
+    }
+
+    // MARK: pin
+
+    var pinned = false
+
+    /// Pinned: floats above every app (and full-screen apps) on every Space.
+    /// Unpinned: an ordinary window that other apps can cover.
+    func setPinned(_ on: Bool) {
+        pinned = on
+        UserDefaults.standard.set(on, forKey: "pinned")
+        window.level = on ? .floating : .normal
+        window.collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
+        pinButton.image = NSImage(systemSymbolName: on ? "pin.fill" : "pin", accessibilityDescription: "置顶")
+        pinButton.contentTintColor = on ? theme.accent : ash
+    }
+
+    @objc func togglePin() { setPinned(!pinned) }
+
+    // MARK: app
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        window.makeKeyAndOrderFront(nil)  // clicking the Dock icon brings the card back
+        return true
+    }
+
+    func buildMainMenu() {
+        let bar = NSMenu()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "打开完整统计", action: #selector(openDashboard), keyEquivalent: "d").target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let view = NSMenu(title: "显示")
+        view.addItem(withTitle: "放大", action: #selector(zoomIn), keyEquivalent: "=").target = self
+        view.addItem(withTitle: "缩小", action: #selector(zoomOut), keyEquivalent: "-").target = self
+        view.addItem(withTitle: "原始大小", action: #selector(zoomReset), keyEquivalent: "0").target = self
+        view.addItem(.separator())
+        view.addItem(withTitle: "置顶 / 取消置顶", action: #selector(togglePin), keyEquivalent: "p").target = self
+        for m in [appMenu, view] { bar.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = m }
+        NSApp.mainMenu = bar
     }
 
     // MARK: character art
@@ -536,9 +628,14 @@ final class WidgetController: NSObject {
             limitLines[0].stringValue = "额度：重开 Claude Code 后显示"
             limitLines[1].stringValue = ""
         }
+        // Power (the user's own agent) runs on the tools above, so it is a share of them.
+        let p = obj["power"] as? [String: Double] ?? [:]
+        let all = ["claude", "codex", "deepseek"].reduce(0) { $0 + (today[$1] ?? 0) }
+        values[3].stringValue = compact(p["tokens"] ?? 0)
+        extras[3].stringValue = String(format: "$%.2f · 占 %.0f%%", p["cost"] ?? 0, all > 0 ? (p["tokens"] ?? 0) / all * 100 : 0)
         values[2].stringValue = compact(today["deepseek"] ?? 0)
         week.days = (obj["week"] as? [[String: Any]] ?? []).map { d in
-            Day(date: d["d"] as? String ?? "", values: ["claude", "codex", "deepseek"].map { (d[$0] as? Double) ?? 0 })
+            Day(date: d["d"] as? String ?? "", values: ["claude", "codex", "deepseek"].map { (d[$0] as? Double) ?? 0 }, power: d["power"] as? Double ?? 0)
         }
         let f = DateFormatter(); f.dateFormat = "M月d日 · 今天"
         date.stringValue = f.string(from: Date())
@@ -550,6 +647,14 @@ final class WidgetController: NSObject {
 }
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)  // no Dock icon, no menu bar
+app.setActivationPolicy(.regular)  // lives in the Dock
+app.applicationIconImage = appIcon()
+// Give the bundle the same icon so it shows in Finder and in the Dock while closed.
+if !FileManager.default.fileExists(atPath: Bundle.main.bundlePath + "/Icon\r") {
+    NSWorkspace.shared.setIcon(app.applicationIconImage, forFile: Bundle.main.bundlePath)
+}
 let controller = WidgetController()
+app.delegate = controller
+controller.buildMainMenu()
+app.activate(ignoringOtherApps: true)
 app.run()

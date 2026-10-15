@@ -1,3 +1,4 @@
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 from claude_usage.scanner import UsageRecord
@@ -12,18 +13,29 @@ def _local_noon(d: date) -> datetime:
 
 
 def test_widget_buckets_today_and_week_per_tool():
-    claude = [UsageRecord(_local_noon(TODAY), "/p", "s", "claude-sonnet-4-6", 1_000_000, 0, 0, 0)]
+    claude = [UsageRecord(_local_noon(TODAY), "/p", "s", "claude-sonnet-4-6", 1_000_000, 0, 0, 0),
+              UsageRecord(_local_noon(TODAY), "/h/.power", "s", "claude-sonnet-4-6", 1_000_000, 0, 0, 0),
+              UsageRecord(_local_noon(TODAY), "/h/.powerx", "s", "claude-sonnet-4-6", 7, 0, 0, 0)]
     codex = CodexScan(
         [TokenEvent(_local_noon(TODAY), "codex", "gpt", 500),
          TokenEvent(_local_noon(TODAY - timedelta(days=7)), "codex", "gpt", 9)],  # outside the week
         CodexLimit(22.0, datetime(2026, 10, 14, tzinfo=timezone.utc)),
     )
     hermes = [TokenEvent(_local_noon(TODAY - timedelta(days=1)), "deepseek", "deepseek-v4-pro", 70)]
-    data = build_widget_data(claude, codex, hermes, TODAY)
-    assert data["today"] == {"claude": 1_000_000, "codex": 500, "deepseek": 0, "claude_cost": 3.0}
+    data = build_widget_data(claude, codex, hermes, TODAY, Path("/h/.power"))
+    assert data["power"] == {"tokens": 1_000_000, "cost": 3.0}
+    codex.events += [TokenEvent(_local_noon(TODAY), "codex", "gpt", 40, "cx1"),
+                     TokenEvent(_local_noon(TODAY), "codex", "gpt", 2, "x", "/h/.power/tasks/1")]
+    oc = [TokenEvent(_local_noon(TODAY), "opencode", "m", 300, "oc1")]
+    data = build_widget_data(claude, codex, hermes, TODAY, Path("/h/.power"), {"cx1", "oc1"}, oc)
+    assert data["today"] == {"claude": 2_000_007, "codex": 542, "deepseek": 0, "claude_cost": 6.0}
+    assert data["power"] == {"tokens": 1_000_342, "cost": 3.0}
+    assert data["week"][-1]["power"] == 1_000_342 and data["week"][-2]["power"] == 0
+    assert data["power_daily"] == [{"d": "2026-10-09", "tokens": 1_000_342, "cost": 3.0,
+                                    "claude": 1_000_000, "codex": 42, "deepseek": 0, "opencode": 300}]
     assert [w["d"] for w in data["week"]][-1] == "2026-10-09" and len(data["week"]) == 7
     assert data["week"][-2]["deepseek"] == 70
-    assert sum(w["codex"] for w in data["week"]) == 500
+    assert sum(w["codex"] for w in data["week"]) == 542
     assert data["codex_limit"]["used_percent"] == 22.0
 
 
@@ -58,3 +70,19 @@ def test_read_claude_limits_accepts_epoch_and_iso(tmp_path):
     assert lim["seven_day"]["resets_at"] == "2026-10-14T03:00:00+00:00"
     f.write_text('{"rate_limits": null}')
     assert read_claude_limits(f) is None
+
+
+def test_history_keeps_days_after_logs_are_cleaned(tmp_path):
+    from claude_usage.widget import daily_totals, save_history
+    f = tmp_path / "daily-history.csv"
+    old_day = TODAY - timedelta(days=40)
+    claude = [UsageRecord(_local_noon(old_day), "/p", "s", "claude-sonnet-4-6", 1_000_000, 0, 0, 0),
+              UsageRecord(_local_noon(TODAY), "/p", "s", "claude-sonnet-4-6", 100, 0, 0, 0)]
+    save_history(f, daily_totals(claude, [TokenEvent(_local_noon(TODAY), "codex", "gpt", 5)]))
+    # Claude Code deleted the old transcript and part of today's: nothing saved may shrink.
+    save_history(f, daily_totals([], [TokenEvent(_local_noon(TODAY), "codex", "gpt", 7)]))
+    assert f.read_text().splitlines() == [
+        "date,claude,codex,deepseek,claude_cost",
+        f"{old_day},1000000,0,0,3.00",
+        f"{TODAY},100,7,0,0.00",
+    ]

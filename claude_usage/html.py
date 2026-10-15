@@ -181,6 +181,18 @@ button.theme { background: none; border: 1px solid var(--border); color: var(--t
     <div class="tile"><div class="label">Busiest day</div><div class="value" id="peak"></div></div>
   </section>
 
+  <section class="card" id="powerCard" hidden>
+    <h2>Power</h2>
+    <div class="sub">Your Power agent's share of the tools above, tokens per day by engine · cost counts the Claude part only</div>
+    <div class="hero" style="margin-top:12px">
+      <div class="tile"><div class="label">Today</div><div class="value" id="pToday"></div></div>
+      <div class="tile"><div class="label">All tracked days</div><div class="value" id="pTotal"></div></div>
+      <div class="tile"><div class="label">Claude cost (all days)</div><div class="value" id="pCost"></div></div>
+    </div>
+    <svg id="pDaily" width="100%" height="200" role="img" aria-label="Power tokens per day, stacked by engine"></svg>
+    <div class="legend" id="pLegend"></div>
+  </section>
+
   <section class="card">
     <h2>Cost per day</h2>
     <div class="sub">Hover a column for the exact value</div>
@@ -299,6 +311,50 @@ $("mixLegend").innerHTML = parts.map(p =>
 $("top").innerHTML = "<tr><th>Started</th><th>Project</th><th>Session</th><th class=num>Tokens</th><th class=num>Cost</th></tr>" +
   DATA.sessions.map(s => `<tr><td>${s.start.slice(0, 16).replace("T", " ")}</td><td>${esc(s.project)}</td>
     <td class=mono>${esc(s.id.slice(0, 8))}</td><td class=num>${compact(s.tokens)}</td><td class=num>${usd(s.cost)}</td></tr>`).join("");
+
+// Power card: live only, from the widget feed (it also scans Codex, Hermes and opencode).
+const ENGINES = [["claude", "Claude", "--s1"], ["codex", "Codex", "--s2"], ["deepseek", "Hermes (DeepSeek)", "--s3"], ["opencode", "opencode", "--s4"]];
+function drawPower(days) {
+  const svg = $("pDaily"), W = svg.clientWidth || 800, H = 200, L = 48, R = 8, T = 12, B = 28;
+  const n = days.length || 1, max = Math.max(...days.map(d => d.tokens), 1);
+  const y = v => T + (H - T - B) * (1 - v / max);
+  const band = (W - L - R) / n, bw = Math.max(1, Math.min(24, band - 2));
+  let s = "";
+  for (let i = 0; i <= 4; i++) { const v = max * i / 4, yy = y(v);
+    s += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="var(--grid)"/><text x="${L - 6}" y="${yy + 4}" text-anchor="end">${compact(v)}</text>`; }
+  const every = Math.ceil(n / Math.max(1, Math.floor((W - L - R) / 56)));
+  days.forEach((d, i) => {
+    const x = L + i * band + (band - bw) / 2; let base = y(0);
+    for (const [k, , c] of ENGINES) { const h = y(0) - y(d[k] || 0);
+      if (h > 0) { s += `<rect x="${x}" y="${base - h}" width="${bw}" height="${h}" fill="var(${c})"/>`; base -= h; } }
+    s += `<rect class="hit" data-i="${i}" x="${L + i * band}" y="${T}" width="${band}" height="${H - T - B}" fill="transparent"/>`;
+    if (i % every === 0) s += `<text x="${L + i * band + band / 2}" y="${H - 8}" text-anchor="middle">${d.d.slice(5)}</text>`;
+  });
+  svg.innerHTML = s;
+  svg.querySelectorAll(".hit").forEach(el => {
+    el.onmousemove = e => { const d = days[+el.dataset.i];
+      showTip(e, `<b>${d.d}</b> · ${compact(d.tokens)} tokens` + ENGINES.filter(([k]) => d[k]).map(([k, name]) => `<br>${name}: ${compact(d[k])}`).join("") + (d.cost ? `<br>Claude cost ${usd(d.cost)}` : "")); };
+    el.onmouseleave = hideTip;
+  });
+}
+if (LIVE) fetch("/widget.json", {cache: "no-store"}).then(r => r.json()).then(w => {
+  const pd = w.power_daily || [];
+  if (!pd.length) return;
+  // Continuous day axis, like the cost chart.
+  const byDay = Object.fromEntries(pd.map(d => [d.d, d])), days = [];
+  for (let d = new Date(pd[0].d + "T12:00:00"), last = new Date(pd[pd.length - 1].d + "T12:00:00"); d <= last; d.setDate(d.getDate() + 1)) {
+    const k = d.toLocaleDateString("sv"); days.push(byDay[k] || {d: k, tokens: 0, cost: 0});
+  }
+  $("powerCard").hidden = false;
+  $("pToday").textContent = compact(w.power.tokens) + " · " + usd(w.power.cost);
+  $("pTotal").textContent = compact(pd.reduce((a, d) => a + d.tokens, 0)) + " tokens";
+  $("pCost").textContent = usd(pd.reduce((a, d) => a + d.cost, 0));
+  const sum = k => pd.reduce((a, d) => a + (d[k] || 0), 0), all = pd.reduce((a, d) => a + d.tokens, 0) || 1;
+  $("pLegend").innerHTML = ENGINES.map(([k, name, c]) =>
+    `<div><span class="sw" style="background:var(${c})"></span>${name} <b style="color:var(--text)">${compact(sum(k))}</b> · ${(sum(k) / all * 100).toFixed(1)}%</div>`).join("");
+  drawPower(days);
+  addEventListener("resize", () => drawPower(days));
+}).catch(() => {});
 
 if (DATA.unpriced) $("unpriced").textContent = DATA.unpriced + " record(s) use a model not in the price table and are counted as $0.";
 </script>

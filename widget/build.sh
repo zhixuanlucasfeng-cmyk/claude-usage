@@ -21,7 +21,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>local.claude-usage.widget</string>
   <key>CFBundleName</key><string>Claude Usage Widget</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>LSUIElement</key><true/>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>CUServerBin</key><string>$BIN</string>
 </dict></plist>
