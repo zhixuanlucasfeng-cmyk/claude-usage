@@ -1,6 +1,6 @@
 [project]
 name = "claude-usage"
-version = "0.1.0"
+version = "0.2.0"
 description = "See your Claude Code, Codex and DeepSeek token usage and cost: CLI, local dashboard and a macOS desktop widget"
 readme = "README.md"
 license = "MIT"
