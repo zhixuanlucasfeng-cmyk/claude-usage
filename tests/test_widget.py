@@ -86,3 +86,21 @@ def test_history_keeps_days_after_logs_are_cleaned(tmp_path):
         f"{old_day},1000000,0,0,3.00",
         f"{TODAY},100,7,0,0.00",
     ]
+
+
+def test_limit_projection_converts_log_spend_into_percent():
+    from claude_usage.widget import add_projections
+    now = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)
+    rec = lambda h, usd: UsageRecord(now - timedelta(hours=h), "/p", "s", "claude-sonnet-4-6", int(usd / 3 * 1e6), 0, 0, 0)
+    # Window opened 3h ago. $2.5 spent by the snapshot 30 min ago, $0.5 since; $1 in the last hour.
+    claude = [rec(3, 2.0), rec(0.75, 0.5), rec(0.25, 0.5), rec(6, 99.0)]  # the $99 is before the window
+    def lim(used):
+        return {"five_hour": {"used_percent": used, "resets_at": (now + timedelta(hours=2)).isoformat()},
+                "saved_at": (now - timedelta(minutes=30)).isoformat()}
+    # 25% for $2.5 -> 10% per dollar
+    assert add_projections(lim(25.0), claude, now)["five_hour"]["projection"] == \
+        {"now": 30.0, "per_hour": 10.0, "at_reset": 50.0, "full_at": None}
+    # 80% for $2.5 -> 32% per dollar: 96% now, 32%/h, 100% in 7.5 min
+    p = add_projections(lim(80.0), claude, now)["five_hour"]["projection"]
+    assert p["now"] == 96.0 and abs(datetime.fromisoformat(p["full_at"]) - (now + timedelta(minutes=7.5))) < timedelta(seconds=1)
+    assert add_projections(lim(0.0), claude, now)["five_hour"]["projection"] is None

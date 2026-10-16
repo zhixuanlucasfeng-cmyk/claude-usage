@@ -159,3 +159,48 @@ def read_claude_limits(path: Path) -> dict | None:
     if isinstance(saved.get("saved_at"), (int, float)):
         out["saved_at"] = _to_iso(saved["saved_at"])
     return out
+
+
+# window length, and how far back to measure the pace: the 5h window follows
+# the last hour; the week follows its own average, since nobody works 24/7.
+WINDOWS = {"five_hour": (timedelta(hours=5), timedelta(hours=1)),
+           "seven_day": (timedelta(days=7), timedelta(days=7))}
+
+
+def project_limit(w: dict, length: timedelta, pace: timedelta, claude: list[UsageRecord], saved_at: datetime, now: datetime) -> dict | None:
+    """Where a plan window is heading, at the pace of the last `pace`.
+
+    The status line only says "used p%" at saved_at. The logs say how many
+    dollars were spent in the window by then, so p / dollars converts log
+    spend into percent: that brings p up to now even while Claude Code is
+    closed, and turns recent spend into a percent-per-hour pace.
+    Limits weigh models by price, so dollars track them better than tokens.
+    """
+    reset = datetime.fromisoformat(w["resets_at"]) if w.get("resets_at") else None
+    if reset is None or reset <= now or w["used_percent"] <= 0:
+        return None
+    start = reset - length
+    spent = sum(_claude_cost(r) for r in claude if start <= r.timestamp <= saved_at)
+    if spent <= 0:
+        return None
+    per_dollar = w["used_percent"] / spent
+    pct = w["used_percent"] + per_dollar * sum(_claude_cost(r) for r in claude if saved_at < r.timestamp <= now)
+    since = max(now - pace, start)
+    hours = (now - since).total_seconds() / 3600
+    per_hour = per_dollar * sum(_claude_cost(r) for r in claude if since <= r.timestamp <= now) / max(hours, 1)
+    hours_left = (reset - now).total_seconds() / 3600
+    full_at = None
+    if per_hour > 0 and pct + per_hour * hours_left >= 100:
+        full_at = (now + timedelta(hours=max(0.0, 100 - pct) / per_hour)).isoformat()
+    return {"now": round(pct, 1), "per_hour": round(per_hour, 1),
+            "at_reset": round(min(pct + per_hour * hours_left, 999), 1), "full_at": full_at}
+
+
+def add_projections(limits: dict | None, claude: list[UsageRecord], now: datetime) -> dict | None:
+    if not limits or not limits.get("saved_at"):
+        return limits
+    saved_at = datetime.fromisoformat(limits["saved_at"])
+    for key, (length, pace) in WINDOWS.items():
+        if key in limits:
+            limits[key]["projection"] = project_limit(limits[key], length, pace, claude, saved_at, now)
+    return limits

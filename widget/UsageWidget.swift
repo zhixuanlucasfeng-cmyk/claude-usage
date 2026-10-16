@@ -580,6 +580,16 @@ final class WidgetController: NSObject, NSApplicationDelegate {
             f.dateFormat = d.timeIntervalSinceNow < 24 * 3600 ? "HH:mm" : "M/d HH:mm"
             text += " · \(f.string(from: d)) 重置"
         }
+        // At the recent pace (see project_limit): when it runs out, else where it ends up at the reset.
+        if let p = w["projection"] as? [String: Any] {
+            if let iso = p["full_at"] as? String, let d = isoDate(iso) {
+                let f = DateFormatter()
+                f.dateFormat = d.timeIntervalSinceNow < 24 * 3600 ? "HH:mm" : "M/d HH:mm"
+                text += " · ⚠︎ 按此速度 \(f.string(from: d)) 用完"
+            } else if let r = p["at_reset"] as? Double {
+                text += String(format: " · 预计 %.0f%%", r)
+            }
+        }
         return text
     }
 

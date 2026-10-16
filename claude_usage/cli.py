@@ -17,7 +17,7 @@ from claude_usage.aggregate import (
 from claude_usage.html import render_dashboard
 from claude_usage.scanner import UsageRecord, scan_projects_dir
 from claude_usage.sources import read_power_sessions, scan_codex, scan_hermes, scan_opencode
-from claude_usage.widget import build_widget_data, daily_totals, read_claude_limits, save_history
+from claude_usage.widget import add_projections, build_widget_data, daily_totals, read_claude_limits, save_history
 
 
 def _default_projects_dir() -> Path:
@@ -105,7 +105,7 @@ def _widget_loop(projects_dir: Path, out: dict) -> None:
             power_ids = read_power_sessions(Path.home() / ".power" / "sessions.jsonl")
             opencode = scan_opencode(Path.home() / ".local" / "share" / "opencode" / "opencode.db", power_ids)
             data = build_widget_data(claude, codex, hermes, date.today(), power_sessions=power_ids, opencode=opencode)
-            data["claude_limit"] = read_claude_limits(claude_limits_file)
+            data["claude_limit"] = add_projections(read_claude_limits(claude_limits_file), claude, datetime.now(timezone.utc))
             out["json"] = json.dumps(data).encode()
         except Exception as e:  # never let the widget feed die; show the error instead
             out["json"] = json.dumps({"error": str(e)}).encode()
