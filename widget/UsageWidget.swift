@@ -198,6 +198,7 @@ final class WidgetController: NSObject, NSApplicationDelegate {
     let status = label("正在读取用量…", size: 10, color: ash)
     // Plan limits, one line each: Claude 5-hour, Claude week, Codex week.
     let limitLines = (0..<3).map { _ in label("", size: 10.5, color: ash) }
+    let allTimeLine = label("", size: 10.5, color: ash)  // Claude cost from the first saved day
     let pinButton = NSButton()
     let character = NSImageView()
     let card = NSView()
@@ -291,7 +292,7 @@ final class WidgetController: NSObject, NSApplicationDelegate {
             row.alignment = .centerY
             rows.append(row)
             // Limit lines sit under their tool, indented past the color key.
-            for line in (i == 0 ? [limitLines[0], limitLines[1]] : i == 1 ? [limitLines[2]] : []) {
+            for line in (i == 0 ? [limitLines[0], limitLines[1], allTimeLine] : i == 1 ? [limitLines[2]] : []) {
                 let pad = NSView()
                 pad.translatesAutoresizingMaskIntoConstraints = false
                 pad.widthAnchor.constraint(equalToConstant: 12).isActive = true
@@ -637,6 +638,11 @@ final class WidgetController: NSObject, NSApplicationDelegate {
         } else {
             limitLines[0].stringValue = "额度：重开 Claude Code 后显示"
             limitLines[1].stringValue = ""
+        }
+        if let at = obj["all_time"] as? [String: Any], let since = at["since"] as? String {
+            let md = since.split(separator: "-").dropFirst().compactMap { Int($0) }
+            allTimeLine.stringValue = String(format: "累计 $%.2f · %@", at["cost"] as? Double ?? 0, compact(at["tokens"] as? Double ?? 0))
+                + (md.count == 2 ? "（自 \(md[0])月\(md[1])日）" : "")
         }
         // Power (the user's own agent) runs on the tools above, so it is a share of them.
         let p = obj["power"] as? [String: Double] ?? [:]

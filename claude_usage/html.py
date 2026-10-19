@@ -93,8 +93,8 @@ def build_dashboard_data(records: list[UsageRecord], top_n: int) -> dict:
     }
 
 
-def render_dashboard(records: list[UsageRecord], top_n: int, live: bool = False) -> str:
-    data = json.dumps(build_dashboard_data(records, top_n))
+def render_dashboard(records: list[UsageRecord], top_n: int, live: bool = False, all_time: dict | None = None) -> str:
+    data = json.dumps({**build_dashboard_data(records, top_n), "all_time": all_time})
     # "</" would let a project path close the <script> tag early.
     page = _TEMPLATE.replace("__DATA__", data.replace("</", "<\\/"))
     return page.replace("const LIVE = false;", "const LIVE = true;") if live else page
@@ -179,6 +179,7 @@ button.theme { background: none; border: 1px solid var(--border); color: var(--t
     <div class="tile"><div class="label">Tokens</div><div class="value" id="tokens"></div></div>
     <div class="tile"><div class="label">Sessions</div><div class="value" id="sessions"></div></div>
     <div class="tile"><div class="label">Busiest day</div><div class="value" id="peak"></div></div>
+    <div class="tile" id="allTimeTile" hidden><div class="label" id="allTimeLabel"></div><div class="value" id="allTime"></div></div>
   </section>
 
   <section class="card" id="powerCard" hidden>
@@ -259,6 +260,11 @@ $("tokens").textContent = compact(totalTokens);
 $("sessions").textContent = DATA.session_count.toLocaleString();
 const peak = DATA.daily.reduce((a, b) => b.cost > a.cost ? b : a, {cost: 0, d: "-"});
 $("peak").textContent = peak.d === "-" ? "-" : usd(peak.cost) + " · " + peak.d.slice(5);
+if (DATA.all_time) {  // the logs above lose old sessions; this comes from the saved daily history
+  $("allTimeTile").hidden = false;
+  $("allTimeLabel").textContent = "All time since " + DATA.all_time.since;
+  $("allTime").textContent = usd(DATA.all_time.cost) + " · " + compact(DATA.all_time.tokens);
+}
 
 // Daily columns: single series, so no legend - the title names it.
 function drawDaily() {

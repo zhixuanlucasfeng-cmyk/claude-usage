@@ -128,6 +128,21 @@ def save_history(path: Path, totals: dict[date, dict]) -> None:
     tmp.replace(path)  # atomic: a crash never leaves a half-written history
 
 
+def history_totals(path: Path) -> dict | None:
+    """All-time Claude cost and tokens from the saved history (the logs alone lose old days)."""
+    if not path.exists():
+        return None
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if int(float(r["claude"] or 0))]
+    if not rows:
+        return None
+    return {
+        "since": min(r["date"] for r in rows),
+        "cost": round(sum(float(r["claude_cost"] or 0) for r in rows), 2),
+        "tokens": sum(int(float(r["claude"])) for r in rows),
+    }
+
+
 def _to_iso(value) -> str | None:
     """resets_at may arrive as epoch seconds or an ISO string."""
     if isinstance(value, (int, float)):

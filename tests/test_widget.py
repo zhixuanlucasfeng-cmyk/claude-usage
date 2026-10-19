@@ -104,3 +104,12 @@ def test_limit_projection_converts_log_spend_into_percent():
     p = add_projections(lim(80.0), claude, now)["five_hour"]["projection"]
     assert p["now"] == 96.0 and abs(datetime.fromisoformat(p["full_at"]) - (now + timedelta(minutes=7.5))) < timedelta(seconds=1)
     assert add_projections(lim(0.0), claude, now)["five_hour"]["projection"] is None
+
+
+def test_history_totals_counts_claude_days_only(tmp_path):
+    from claude_usage.widget import history_totals
+    f = tmp_path / "daily-history.csv"
+    assert history_totals(f) is None
+    f.write_text("date,claude,codex,deepseek,claude_cost\n"
+                 "2026-05-30,0,100,0,0.00\n2026-07-06,1000,0,0,1.50\n2026-07-07,500,9,0,2.25\n")
+    assert history_totals(f) == {"since": "2026-07-06", "cost": 3.75, "tokens": 1500}

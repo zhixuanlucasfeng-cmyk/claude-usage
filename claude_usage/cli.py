@@ -17,7 +17,20 @@ from claude_usage.aggregate import (
 from claude_usage.html import render_dashboard
 from claude_usage.scanner import UsageRecord, scan_projects_dir
 from claude_usage.sources import read_power_sessions, scan_codex, scan_hermes, scan_opencode
-from claude_usage.widget import add_projections, build_widget_data, daily_totals, read_claude_limits, save_history
+from claude_usage.widget import add_projections, build_widget_data, daily_totals, history_totals, read_claude_limits, save_history
+
+
+HISTORY_FILE = Path.home() / "Library" / "Application Support" / "ClaudeUsageWidget" / "daily-history.csv"
+
+
+def _all_time(records: list[UsageRecord]) -> dict | None:
+    """Fold today's logs into the saved history, then total it from day one."""
+    try:
+        save_history(HISTORY_FILE, daily_totals(records, []))
+        return history_totals(HISTORY_FILE)
+    except Exception as e:  # history is a bonus; the report still works without it
+        print(f"history: {e}", file=sys.stderr)
+        return None
 
 
 def _default_projects_dir() -> Path:
@@ -31,7 +44,7 @@ def _filter_since(records: list[UsageRecord], days: int | None) -> list[UsageRec
     return [r for r in records if r.timestamp >= cutoff]
 
 
-def build_report(records: list[UsageRecord], top_n: int) -> str:
+def build_report(records: list[UsageRecord], top_n: int, all_time: dict | None = None) -> str:
     by_project = aggregate_by_project(records)
     total_cost = sum(entry.total_cost for entry in by_project)
     session_count = len({r.session_id for r in records})
@@ -60,7 +73,9 @@ def build_report(records: list[UsageRecord], top_n: int) -> str:
         lines.append(f"  {entry.key}  ${entry.total_cost:.2f}")
 
     lines.append("")
-    lines.append(f"Total: ${total_cost:.2f}")
+    lines.append(f"Total: ${total_cost:.2f}" + (" (sessions still in the logs; Claude Code deletes old ones)" if all_time else ""))
+    if all_time:
+        lines.append(f"All time since {all_time['since']}: ${all_time['cost']:.2f} · {all_time['tokens'] / 1e9:.2f}B tokens")
 
     unpriced = total_unpriced_count(records)
     if unpriced:
@@ -94,7 +109,7 @@ def _widget_loop(projects_dir: Path, out: dict) -> None:
     # Written by the Claude Code status line script (~/.claude/hooks/usage-statusline.sh).
     support = Path.home() / "Library" / "Application Support" / "ClaudeUsageWidget"
     claude_limits_file = support / "claude-limits.json"
-    history_file = support / "daily-history.csv"
+    history_file = HISTORY_FILE
     version, claude = None, []
     while True:
         try:
@@ -106,14 +121,14 @@ def _widget_loop(projects_dir: Path, out: dict) -> None:
             opencode = scan_opencode(Path.home() / ".local" / "share" / "opencode" / "opencode.db", power_ids)
             data = build_widget_data(claude, codex, hermes, date.today(), power_sessions=power_ids, opencode=opencode)
             data["claude_limit"] = add_projections(read_claude_limits(claude_limits_file), claude, datetime.now(timezone.utc))
+            try:
+                save_history(history_file, daily_totals(claude, [*codex.events, *hermes]))
+                data["all_time"] = history_totals(history_file)
+            except Exception as e:  # a bad history file must not take the widget down
+                print(f"history: {e}", file=sys.stderr)
             out["json"] = json.dumps(data).encode()
         except Exception as e:  # never let the widget feed die; show the error instead
             out["json"] = json.dumps({"error": str(e)}).encode()
-        else:
-            try:
-                save_history(history_file, daily_totals(claude, [*codex.events, *hermes]))
-            except Exception as e:  # a bad history file must not take the widget down
-                print(f"history: {e}", file=sys.stderr)
         time.sleep(15)
 
 
@@ -131,7 +146,8 @@ def serve(projects_dir: Path, days: int | None, top_n: int, port: int, open_brow
             elif self.path == "/version":
                 body, kind = _logs_version(projects_dir).encode(), "text/plain"
             elif self.path == "/":
-                page = render_dashboard(load_records(projects_dir, days), top_n, live=True)
+                records = load_records(projects_dir, days)
+                page = render_dashboard(records, top_n, live=True, all_time=None if days else _all_time(records))
                 body, kind = page.encode("utf-8"), "text/html; charset=utf-8"
             else:
                 self.send_error(404)
@@ -198,13 +214,14 @@ def main() -> None:
         sys.exit(1)
 
     if args.command == "html":
-        args.out.write_text(render_dashboard(records, args.top), encoding="utf-8")
+        all_time = None if args.days else _all_time(records)
+        args.out.write_text(render_dashboard(records, args.top, all_time=all_time), encoding="utf-8")
         print(f"Wrote {args.out}")
         if not args.no_open:
             webbrowser.open(args.out.resolve().as_uri())
         return
 
-    print(build_report(records, args.top))
+    print(build_report(records, args.top, None if args.days else _all_time(records)))
 
 
 if __name__ == "__main__":
